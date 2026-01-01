@@ -68,6 +68,13 @@ class RetrievalTool():
         # Validate mixture_alpha
         assert 0.0 <= mixture_alpha <= 1.0, \
             f"mixture_alpha must be in [0, 1], got {mixture_alpha}"
+
+        # Print retrieval configuration for verification
+        print(f"Retrieval Configuration:")
+        print(f"  Similarity Type: {self.similarity_type}")
+        print(f"  Phase Multipliers: {self.phase_multipliers}")
+        print(f"  Top-m per multiplier: {self.topm}")
+        print(f"  Total Candidates per Query: {len(self.phase_multipliers) * self.topm}")
         
     def prepare_dataset(self, train_data):
         train_data_all = []
