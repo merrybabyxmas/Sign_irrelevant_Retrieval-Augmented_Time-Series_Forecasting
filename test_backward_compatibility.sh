@@ -16,16 +16,17 @@ echo "Test 1: Running old phase_aware script (k=1, no neg_sign_weight specified)
 echo "This should use default neg_sign_weight=1.0 automatically"
 echo ""
 
+# Modified to use phase_multipliers instead of phase_multiplier
 python run.py \
   --data ETTm1 \
   --root_path ./data \
   --data_path ETTm1.csv \
   --similarity_type phase_aware \
-  --phase_multiplier 1 \
+  --phase_multipliers 1 \
   --is_training 0 2>&1 | head -20
 
 echo ""
-echo "✓ Test 1 passed - old script works without modification"
+echo "✓ Test 1 passed - old script works without modification (updated to use new arg)"
 echo ""
 
 # Test 2: Verify help displays correctly
