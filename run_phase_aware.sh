@@ -26,7 +26,7 @@ python run.py \
   --similarity_type phase_aware \
   --neg_sign_weight 1.0 \
   --shift_range 1 \
-  --phase_multiplier 2 \
+  --phase_multipliers 2 \
   --mixture_alpha 0.7
 
 echo ""

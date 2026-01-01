@@ -98,8 +98,11 @@ if __name__ == '__main__':
         help='Similarity metric for retrieval: cosine, pearson, or phase_aware'
     )
     parser.add_argument(
-        '--phase_multiplier', type=int, default=4,
-        help='Frequency multiplier k for phase-aware similarity'
+        "--phase_multipliers",
+        type=int,
+        nargs="+",
+        default=[4],
+        help="List of phase multipliers for multi-multiplier retrieval (e.g., 1 4 or 1 2 4)"
     )
     parser.add_argument(
         '--neg_sign_weight', type=float, default=1.0,

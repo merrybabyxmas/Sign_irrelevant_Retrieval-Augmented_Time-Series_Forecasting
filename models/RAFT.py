@@ -38,7 +38,7 @@ class Model(nn.Module):
             n_period=self.n_period,
             topm=self.topm,
             similarity_type=getattr(configs, 'similarity_type', 'cosine'),
-            phase_multiplier=getattr(configs, 'phase_multiplier', 4),
+            phase_multipliers=getattr(configs, 'phase_multipliers', [4]),
             neg_sign_weight=getattr(configs, 'neg_sign_weight', 1.0),
             shift_range=getattr(configs, 'shift_range', 0),
             mixture_alpha=getattr(configs, 'mixture_alpha', 0.0),
