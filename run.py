@@ -46,12 +46,12 @@ if __name__ == '__main__':
     parser.add_argument('--mask_rate', type=float, default=0.25, help='mask ratio')
 
     # anomaly detection task
-    parser.add_argument('--anomaly_ratio', type=float, default=0.25, help='prior anomaly ratio (%)')
+    parser.add_argument('--anomaly_ratio', type=float, default=0.25, help='prior anomaly ratio in percent')
 
     # model define
     parser.add_argument('--expand', type=int, default=2, help='expansion factor for Mamba')
     parser.add_argument('--d_conv', type=int, default=4, help='conv kernel size for Mamba')
-    parser.add_argument('--top_k', type=int, default=5, help='for TimesBlock')
+    parser.add_argument('--top_k', type=int, default=10, help='for TimesBlock')
     parser.add_argument('--num_kernels', type=int, default=6, help='for Inception')
     parser.add_argument('--enc_in', type=int, default=7, help='encoder input size')
     parser.add_argument('--dec_in', type=int, default=7, help='decoder input size')
@@ -93,6 +93,26 @@ if __name__ == '__main__':
         '--topm', type=int, default=20,
         help='Number of Retrievals'
     )
+    parser.add_argument(
+        '--similarity_type', type=str, default='cosine',
+        help='Similarity metric for retrieval: cosine, pearson, or phase_aware'
+    )
+    parser.add_argument(
+        '--phase_multiplier', type=int, default=4,
+        help='Frequency multiplier k for phase-aware similarity'
+    )
+    parser.add_argument(
+        '--neg_sign_weight', type=float, default=1.0,
+        help='Attenuation factor for phase similarity when cosine similarity is negative'
+    )
+    parser.add_argument(
+        '--shift_range', type=int, default=0,
+        help='Maximum temporal shift for shift-invariant similarity (0 = disabled)'
+    )
+    parser.add_argument(
+        '--mixture_alpha', type=float, default=0.0,
+        help='Mixture weight for similarity softening: alpha*cos(theta) + (1-alpha)*cos(k*theta)'
+    )
 
     # optimization
     parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
@@ -114,12 +134,12 @@ if __name__ == '__main__':
 
     # de-stationary projector params
     parser.add_argument('--p_hidden_dims', type=int, nargs='+', default=[128, 128],
-                        help='hidden layer dimensions of projector (List)')
+                        help='hidden layer dimensions of projector as list')
     parser.add_argument('--p_hidden_layers', type=int, default=2, help='number of hidden layers in projector')
 
     # metrics (dtw)
     parser.add_argument('--use_dtw', type=bool, default=False, 
-                        help='the controller of using dtw metric (dtw is time consuming, not suggested unless necessary)')
+                        help='the controller of using dtw metric - time consuming')
     
     # Augmentation
     parser.add_argument('--augmentation_ratio', type=int, default=0, help="How many times to augment")

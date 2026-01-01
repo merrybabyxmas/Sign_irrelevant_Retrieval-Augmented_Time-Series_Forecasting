@@ -19,6 +19,11 @@ class RetrievalTool():
         topm=20,
         with_dec=False,
         return_key=False,
+        similarity_type='cosine',  # 'cosine', 'pearson', or 'phase_aware'
+        phase_multiplier=4,  # k value for phase-aware similarity
+        neg_sign_weight=1.0,  # attenuation factor for negative cosine similarity
+        shift_range=0,  # maximum temporal shift for shift-invariant similarity
+        mixture_alpha=0.0,  # mixture weight: α·cos(θ) + (1-α)·cos(kθ)
     ):
         period_num = [16, 8, 4, 2, 1]
         period_num = period_num[-1 * n_period:]
@@ -32,9 +37,32 @@ class RetrievalTool():
         
         self.temperature = temperature
         self.topm = topm
-        
+
         self.with_dec = with_dec
         self.return_key = return_key
+
+        # Phase-aware similarity configuration
+        self.similarity_type = similarity_type
+        self.phase_multiplier = phase_multiplier
+        self.neg_sign_weight = neg_sign_weight
+        self.shift_range = shift_range
+        self.mixture_alpha = mixture_alpha
+
+        # Validate similarity type
+        assert similarity_type in ['cosine', 'pearson', 'phase_aware'], \
+            f"similarity_type must be 'cosine', 'pearson', or 'phase_aware', got {similarity_type}"
+
+        # Validate neg_sign_weight
+        assert 0.0 < neg_sign_weight <= 1.0, \
+            f"neg_sign_weight must be in (0, 1], got {neg_sign_weight}"
+
+        # Validate shift_range
+        assert shift_range >= 0, \
+            f"shift_range must be non-negative, got {shift_range}"
+
+        # Validate mixture_alpha
+        assert 0.0 <= mixture_alpha <= 1.0, \
+            f"mixture_alpha must be in [0, 1], got {mixture_alpha}"
         
     def prepare_dataset(self, train_data):
         train_data_all = []
@@ -80,30 +108,124 @@ class RetrievalTool():
             offset = None
             
         offset = torch.stack(offset, dim=0)
-            
+
         return mg, offset
-    
+
+    def temporal_shift(self, x, delta):
+        """
+        Shift tensor along the time (feature) dimension by delta positions.
+
+        Args:
+            x: Tensor of shape (..., features)
+            delta: Number of positions to shift (positive = right, negative = left)
+
+        Returns:
+            Shifted tensor with same shape as input, padded with zeros
+        """
+        if delta == 0:
+            return x
+
+        if delta > 0:
+            # Shift right: remove first delta elements, pad zeros at end
+            return torch.cat([x[..., delta:], torch.zeros_like(x[..., :delta])], dim=-1)
+        else:
+            # Shift left: remove last |delta| elements, pad zeros at start
+            return torch.cat([torch.zeros_like(x[..., :-delta]), x[..., :delta]], dim=-1)
+
+    def compute_base_similarity(self, bx_norm, ax_norm):
+        """
+        Compute base similarity between normalized query and key patches.
+
+        This encapsulates the similarity logic (cosine, pearson, or phase-aware with sign attenuation)
+        to enable reuse in shift-invariant similarity computation.
+
+        Args:
+            bx_norm: Normalized query patches, shape (G, B, features)
+            ax_norm: Normalized key patches, shape (G, T, features)
+
+        Returns:
+            Similarity tensor, shape (G, B, T)
+        """
+        if self.similarity_type == 'pearson' or self.similarity_type == 'cosine':
+            # Original implementation: Pearson correlation / cosine similarity
+            # Both are equivalent after centering (mean removal)
+            return torch.bmm(bx_norm, ax_norm.transpose(-1, -2))
+
+        elif self.similarity_type == 'phase_aware':
+            # Phase-aware cosine similarity for time-series retrieval
+            eps = 1e-8
+
+            # Compute standard cosine similarity: cos(θ)
+            cos_sim = torch.bmm(bx_norm, ax_norm.transpose(-1, -2))
+
+            # Compute angle θ from cosine similarity
+            # Clamp to avoid numerical issues with acos
+            cos_sim_clamped = torch.clamp(cos_sim, -1.0 + eps, 1.0 - eps)
+            theta = torch.acos(cos_sim_clamped)
+
+            # Apply phase-aware transformation: ρ = cos(k * θ)
+            phase_sim = torch.cos(self.phase_multiplier * theta)
+
+            # Apply mixture softening: α·cos(θ) + (1-α)·cos(kθ)
+            if self.mixture_alpha > 0:
+                phase_sim = self.mixture_alpha * torch.cos(theta) + (1.0 - self.mixture_alpha) * phase_sim
+
+            # Apply sign-dependent attenuation
+            # When cos(θ) < 0 (anti-correlated), attenuate the similarity by neg_sign_weight
+            sign_weight = torch.where(
+                cos_sim >= 0,
+                torch.ones_like(cos_sim),
+                self.neg_sign_weight * torch.ones_like(cos_sim)
+            )
+
+            return phase_sim * sign_weight
+
     def periodic_batch_corr(self, data_all, key, in_bsz = 512):
         _, bsz, features = key.shape
         _, train_len, _ = data_all.shape
-        
+
         bx = key - torch.mean(key, dim=2, keepdim=True)
-        
+
         iters = math.ceil(train_len / in_bsz)
-        
+
         sim = []
         for i in range(iters):
             start_idx = i * in_bsz
             end_idx = min((i + 1) * in_bsz, train_len)
-            
+
             cur_data = data_all[:, start_idx:end_idx].to(key.device)
             ax = cur_data - torch.mean(cur_data, dim=2, keepdim=True)
-            
-            cur_sim = torch.bmm(F.normalize(bx, dim=2), F.normalize(ax, dim=2).transpose(-1, -2))
+
+            # Normalize once for all shifts (efficiency)
+            bx_norm = F.normalize(bx, dim=2)
+            ax_norm = F.normalize(ax, dim=2)
+
+            if self.shift_range == 0:
+                # No shift invariance: use standard similarity computation
+                cur_sim = self.compute_base_similarity(bx_norm, ax_norm)
+
+            else:
+                # Shift-invariant similarity: compute similarity for all shifts and take max
+                # This allows the model to handle small temporal misalignments
+                sims_at_shifts = []
+
+                for delta in range(-self.shift_range, self.shift_range + 1):
+                    # Shift the key patches along the time dimension
+                    ax_shifted = self.temporal_shift(ax_norm, delta)
+
+                    # Compute similarity at this shift
+                    sim_at_delta = self.compute_base_similarity(bx_norm, ax_shifted)
+                    sims_at_shifts.append(sim_at_delta)
+
+                # Stack all similarities and take max across shifts
+                # Shape: (num_shifts, G, B, T) -> max over dim=0 -> (G, B, T)
+                sims_stacked = torch.stack(sims_at_shifts, dim=0)
+                cur_sim = torch.max(sims_stacked, dim=0).values
+
             sim.append(cur_sim)
-            
+
         sim = torch.cat(sim, dim=2)
-        
+
         return sim
         
     def retrieve(self, x, index, train=True):

@@ -37,6 +37,11 @@ class Model(nn.Module):
             channels=self.channels,
             n_period=self.n_period,
             topm=self.topm,
+            similarity_type=getattr(configs, 'similarity_type', 'cosine'),
+            phase_multiplier=getattr(configs, 'phase_multiplier', 4),
+            neg_sign_weight=getattr(configs, 'neg_sign_weight', 1.0),
+            shift_range=getattr(configs, 'shift_range', 0),
+            mixture_alpha=getattr(configs, 'mixture_alpha', 0.0),
         )
         
         self.period_num = self.rt.period_num[-1 * self.n_period:]
@@ -69,9 +74,9 @@ class Model(nn.Module):
         del self.rt
         torch.cuda.empty_cache()
             
-        self.retrieval_dict['train'] = train_rt.detach()
-        self.retrieval_dict['valid'] = valid_rt.detach()
-        self.retrieval_dict['test'] = test_rt.detach()
+        self.retrieval_dict['train'] = train_rt.detach().to(self.device)
+        self.retrieval_dict['valid'] = valid_rt.detach().to(self.device)
+        self.retrieval_dict['test'] = test_rt.detach().to(self.device)
 
     def encoder(self, x, index, mode):
         index = index.to(self.device)
@@ -84,6 +89,7 @@ class Model(nn.Module):
 
         x_pred_from_x = self.linear_x(x_norm.permute(0, 2, 1)).permute(0, 2, 1) # B, P, C
         
+        index = index.to(self.device)
         pred_from_retrieval = self.retrieval_dict[mode][:, index] # G, B, P, C
         pred_from_retrieval = pred_from_retrieval.to(self.device)
         
